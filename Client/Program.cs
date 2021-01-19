@@ -24,6 +24,7 @@ namespace BlazorRepl.Client
             builder.Services.AddScoped(_ => new HttpClient { BaseAddress = new Uri(builder.HostEnvironment.BaseAddress) });
             builder.Services.AddScoped<SnippetsService>();
             builder.Services.AddSingleton(new CompilationService());
+            builder.Services.AddTelerikBlazor();
 
             builder.Services
                 .AddOptions<SnippetsOptions>()

@@ -4,6 +4,7 @@
     using System.Collections.Concurrent;
     using System.Collections.Generic;
     using System.ComponentModel.DataAnnotations;
+    using System.Data;
     using System.IO;
     using System.Linq;
     using System.Net.Http;
@@ -17,6 +18,8 @@
     using Microsoft.CodeAnalysis.CSharp;
     using Microsoft.CodeAnalysis.Razor;
     using Microsoft.JSInterop;
+    using Telerik.Blazor.Components;
+    using Telerik.Blazor.Extensions;
 
     public class CompilationService
     {
@@ -30,7 +33,10 @@
 @using Microsoft.AspNetCore.Components.Forms
 @using Microsoft.AspNetCore.Components.Routing
 @using Microsoft.AspNetCore.Components.Web
-@using Microsoft.JSInterop";
+@using Microsoft.JSInterop
+@using Telerik.Blazor
+@using Telerik.DataSource.Extensions
+@using Telerik.Blazor.Components";
 
         // Creating the initial compilation + reading references is on the order of 250ms without caching
         // so making sure it doesn't happen for each run.
@@ -56,6 +62,9 @@
                 typeof(HttpClient).Assembly, // System.Net.Http
                 typeof(IJSRuntime).Assembly, // Microsoft.JSInterop
                 typeof(RequiredAttribute).Assembly, // System.ComponentModel.Annotations
+                typeof(DataTable).Assembly, // System.Data
+                typeof(TelerikGrid<>).Assembly, // Telerik.Blazor.Components
+                typeof(DataSourceExtensions).Assembly, // Telerik.DataSource
             };
 
             var assemblyNames = basicReferenceAssemblyRoots
@@ -83,7 +92,13 @@
                 new CSharpCompilationOptions(
                     OutputKind.DynamicallyLinkedLibrary,
                     optimizationLevel: OptimizationLevel.Release,
-                    concurrentBuild: false));
+                    concurrentBuild: false,
+                    //// Warnings CS1701 and CS1702 are disabled when compiling in VS too
+                    specificDiagnosticOptions: new[]
+                    {
+                        new KeyValuePair<string, ReportDiagnostic>("CS1701", ReportDiagnostic.Suppress),
+                        new KeyValuePair<string, ReportDiagnostic>("CS1702", ReportDiagnostic.Suppress),
+                    }));
 
             cSharpParseOptions = new CSharpParseOptions(LanguageVersion.Preview);
         }

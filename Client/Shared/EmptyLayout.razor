@@ -1,5 +1,7 @@
 ﻿@inherits LayoutComponentBase
 
+@using Telerik.Blazor.Components
+
 <style>
     .main > div {
         padding-left: 2rem !important;
@@ -28,8 +30,11 @@
     }
 </style>
 
-<div class="main">
-    <div class="content px-4">
-        @Body
+<TelerikRootComponent>
+    <div class="main">
+        <div class="content px-4">
+            @Body
+        </div>
     </div>
-</div>
+</TelerikRootComponent>
+
