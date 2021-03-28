@@ -9,6 +9,7 @@
     using BlazorRepl.Client.Models;
     using BlazorRepl.Client.Services;
     using BlazorRepl.Core;
+    using BlazorRepl.Core.PackageInstallation;
     using Microsoft.AspNetCore.Components;
     using Microsoft.JSInterop;
 
@@ -18,7 +19,6 @@
         private const string MainUserPagePath = "/__main";
 
         private DotNetObjectReference<Repl> dotNetInstance;
-        private string errorMessage;
         private CodeFile activeCodeFile;
 
         [Inject]
@@ -30,26 +30,50 @@
         [Inject]
         public IJSInProcessRuntime JsRuntime { get; set; }
 
-        [Inject]
-        public IJSUnmarshalledRuntime UnmarshalledJsRuntime { get; set; }
-
         [Parameter]
         public string SnippetId { get; set; }
 
-        public CodeEditor CodeEditorComponent { get; set; }
-
-        public IDictionary<string, CodeFile> CodeFiles { get; set; } = new Dictionary<string, CodeFile>();
-
         [CascadingParameter]
-        private PageNotifications PageNotificationsComponent { get; set; }
+        private Func<PageNotifications> GetPageNotificationsComponent { get; set; }
+
+        private CodeEditor CodeEditorComponent { get; set; }
+
+        private IDictionary<string, CodeFile> CodeFiles { get; set; } = new Dictionary<string, CodeFile>();
 
         private IList<string> CodeFileNames { get; set; } = new List<string>();
 
+        private string CodeEditorPath => this.activeCodeFile?.Path;
+
         private string CodeEditorContent => this.activeCodeFile?.Content;
+
+        private CodeFileType CodeFileType => this.activeCodeFile?.Type ?? CodeFileType.Razor;
+
+        private PackageManager PackageManagerComponent { get; set; }
+
+        private StaticAssetManager StaticAssetManagerComponent { get; set; }
+
+        private IReadOnlyCollection<Package> InstalledPackages =>
+            this.PackageManagerComponent?.GetInstalledPackages() ?? Array.Empty<Package>();
+
+        private int InstalledPackagesCount => this.InstalledPackages.Count;
+
+        private ICollection<Package> PackagesToRestore { get; set; } = new List<Package>();
+
+        private StaticAssets StaticAssets { get; } = new();
+
+        private int StaticAssetsCount { get; set; }
+
+        private bool PackageManagerVisible { get; set; }
+
+        private bool StaticAssetManagerVisible { get; set; }
 
         private bool SaveSnippetPopupVisible { get; set; }
 
-        private string Preset { get; set; } = "basic";
+        private string ActivitySidebarExpandedClass =>
+            this.PackageManagerVisible || this.StaticAssetManagerVisible ? "activity-sidebar-expanded" : string.Empty;
+
+        private string SplittableContainerClass =>
+            this.PackageManagerVisible || this.StaticAssetManagerVisible ? "splittable-container-shrunk" : "splittable-container-full";
 
         private IReadOnlyCollection<CompilationDiagnostic> Diagnostics { get; set; } = Array.Empty<CompilationDiagnostic>();
 
@@ -57,7 +81,9 @@
 
         private string LoaderText { get; set; }
 
-        private bool Loading { get; set; }
+        private bool ShowLoader { get; set; }
+
+        private string SessionId { get; } = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString();
 
         [JSInvokable]
         public async Task TriggerCompileAsync()
@@ -70,9 +96,10 @@
         public void Dispose()
         {
             this.dotNetInstance?.Dispose();
-            this.PageNotificationsComponent?.Dispose();
 
-            this.JsRuntime.InvokeVoid("App.Repl.dispose");
+            this.GetPageNotificationsComponent()?.Dispose();
+
+            this.JsRuntime.InvokeVoid("App.Repl.dispose", this.SessionId);
         }
 
         protected override void OnAfterRender(bool firstRender)
@@ -85,15 +112,7 @@
                     "App.Repl.init",
                     "user-code-editor-container",
                     "user-page-window-container",
-                    "user-code-editor",
                     this.dotNetInstance);
-            }
-
-            if (!string.IsNullOrWhiteSpace(this.errorMessage) && this.PageNotificationsComponent != null)
-            {
-                this.PageNotificationsComponent.AddNotification(NotificationType.Error, content: this.errorMessage);
-
-                this.errorMessage = null;
             }
 
             base.OnAfterRender(firstRender);
@@ -101,29 +120,43 @@
 
         protected override async Task OnInitializedAsync()
         {
-            this.PageNotificationsComponent?.Clear();
+            await this.CompilationService.InitializeAsync();
+
+            this.GetPageNotificationsComponent().Clear();
 
             if (!string.IsNullOrWhiteSpace(this.SnippetId))
             {
                 try
                 {
-                    this.CodeFiles = (await this.SnippetsService.GetSnippetContentAsync(this.SnippetId)).ToDictionary(f => f.Path, f => f);
+                    var snippetResponse = await this.SnippetsService.GetSnippetContentAsync(this.SnippetId);
+
+                    this.CodeFiles = snippetResponse.Files?.ToDictionary(f => f.Path, f => f) ?? new Dictionary<string, CodeFile>();
                     if (!this.CodeFiles.Any())
                     {
-                        this.errorMessage = "No files in snippet.";
+                        this.GetPageNotificationsComponent().AddNotification(NotificationType.Error, "No files in snippet.");
                     }
                     else
                     {
                         this.activeCodeFile = this.CodeFiles.First().Value;
+
+                        this.PackagesToRestore = snippetResponse.InstalledPackages?.ToList() ?? new List<Package>();
+
+                        this.StaticAssets.Scripts = snippetResponse.StaticAssets?.Scripts ?? new List<StaticAsset>();
+                        this.StaticAssets.Styles = snippetResponse.StaticAssets?.Styles ?? new List<StaticAsset>();
+                        this.HandleStaticAssetsUpdated();
+
+                        this.StateHasChanged();
                     }
                 }
                 catch (ArgumentException)
                 {
-                    this.errorMessage = "Invalid Snippet ID.";
+                    this.GetPageNotificationsComponent().AddNotification(NotificationType.Error, "Invalid Snippet ID.");
                 }
                 catch (Exception)
                 {
-                    this.errorMessage = "Unable to get snippet content. Please try again later.";
+                    this.GetPageNotificationsComponent().AddNotification(
+                        NotificationType.Error,
+                        "Unable to get snippet content. Please try again later.");
                 }
             }
 
@@ -144,59 +177,73 @@
 
         private async Task CompileAsync()
         {
-            this.Loading = true;
+            this.ShowLoader = true;
             this.LoaderText = "Processing";
 
-            await Task.Delay(10); // Ensure rendering has time to be called
+            await Task.Delay(1); // Ensure rendering has time to be called
+
+            if (this.PackagesToRestore.Any())
+            {
+                await this.PackageManagerComponent.RestorePackagesAsync();
+            }
 
             CompileToAssemblyResult compilationResult = null;
-            CodeFile mainComponent = null;
-            string originalMainComponentContent = null;
             try
             {
                 this.UpdateActiveCodeFileContent();
 
-                // Add the necessary main component code prefix and store the original content so we can revert right after compilation.
-                if (this.CodeFiles.TryGetValue(CoreConstants.MainComponentFilePath, out mainComponent))
+                this.CodeFiles.TryGetValue(CoreConstants.MainComponentFilePath, out var mainComponent);
+                if (mainComponent == null)
                 {
-                    originalMainComponentContent = mainComponent.Content;
-                    mainComponent.Content = MainComponentCodePrefix + originalMainComponentContent;
+                    this.GetPageNotificationsComponent().AddNotification(
+                        NotificationType.Error,
+                        content: "Invalid set of code files for compilation. Please reload the app.");
+
+                    return;
                 }
 
-                compilationResult = await this.CompilationService.CompileToAssemblyAsync(
-                    this.CodeFiles.Values,
-                    this.Preset,
-                    this.UpdateLoaderTextAsync);
+                var codeFiles = new List<CodeFile>(this.CodeFiles.Count)
+                {
+                    // Add the necessary code prefix to main component
+                    new() { Path = mainComponent.Path, Content = MainComponentCodePrefix + mainComponent.Content },
+                };
+
+                codeFiles.AddRange(this.CodeFiles.Values.Where(f => f.Path != CoreConstants.MainComponentFilePath));
+
+                compilationResult = await this.CompilationService.CompileToAssemblyAsync(codeFiles, this.UpdateLoaderTextAsync);
 
                 this.Diagnostics = compilationResult.Diagnostics.OrderByDescending(x => x.Severity).ThenBy(x => x.Code).ToList();
                 this.AreDiagnosticsShown = true;
             }
             catch (Exception)
             {
-                this.PageNotificationsComponent.AddNotification(NotificationType.Error, content: "Error while compiling the code.");
+                this.GetPageNotificationsComponent().AddNotification(NotificationType.Error, content: "Error while compiling the code.");
             }
             finally
             {
-                if (mainComponent != null)
-                {
-                    mainComponent.Content = originalMainComponentContent;
-                }
-
-                this.Loading = false;
+                this.ShowLoader = false;
             }
 
             if (compilationResult?.AssemblyBytes?.Length > 0)
             {
-                this.UnmarshalledJsRuntime.InvokeUnmarshalled<byte[], object>(
-                    "App.Repl.updateUserAssemblyInCacheStorage",
-                    compilationResult.AssemblyBytes);
+                // Make sure the DLL is updated before reloading the user page
+                await this.JsRuntime.InvokeVoidAsync("App.CodeExecution.updateUserComponentsDll", compilationResult.AssemblyBytes);
+
+                var userPagePath = this.InstalledPackagesCount > 0 || this.StaticAssetsCount > 0
+                    ? $"{MainUserPagePath}#{this.SessionId}"
+                    : MainUserPagePath;
 
                 // TODO: Add error page in iframe
-                this.JsRuntime.InvokeVoid("App.reloadIFrame", "user-page-window", MainUserPagePath);
+                this.JsRuntime.InvokeVoid("App.reloadIFrame", "user-page-window", userPagePath);
             }
         }
 
-        private void ShowSaveSnippetPopup() => this.SaveSnippetPopupVisible = true;
+        private void ShowSaveSnippetPopup()
+        {
+            this.UpdateActiveCodeFileContent();
+
+            this.SaveSnippetPopupVisible = true;
+        }
 
         private void HandleTabActivate(string name)
         {
@@ -234,16 +281,83 @@
 
             var nameWithoutExtension = Path.GetFileNameWithoutExtension(name);
 
-            this.CodeFiles.TryAdd(name, new CodeFile { Path = name, Content = $"<h1>{nameWithoutExtension}</h1>" });
+            var newCodeFile = new CodeFile { Path = name };
 
-            this.JsRuntime.InvokeVoid("App.Repl.setCodeEditorContainerHeight");
+            newCodeFile.Content = newCodeFile.Type == CodeFileType.CSharp
+                ? string.Format(CoreConstants.DefaultCSharpFileContentFormat, nameWithoutExtension)
+                : string.Format(CoreConstants.DefaultRazorFileContentFormat, nameWithoutExtension);
+
+            this.CodeFiles.TryAdd(name, newCodeFile);
+
+            // TODO: update method name when refactoring the code editor JS module
+            this.JsRuntime.InvokeVoid(
+                "App.Repl.setCodeEditorContainerHeight",
+                newCodeFile.Type == CodeFileType.CSharp ? "csharp" : "razor");
         }
+
+        private void HandleScaffoldStartupSettingClick()
+        {
+            this.UpdateActiveCodeFileContent();
+
+            if (!this.CodeFiles.TryGetValue(CoreConstants.StartupClassFilePath, out var startupCodeFile))
+            {
+                startupCodeFile = new CodeFile
+                {
+                    Path = CoreConstants.StartupClassFilePath,
+                    Content = CoreConstants.StartupClassDefaultFileContent,
+                };
+
+                this.CodeFiles.Add(CoreConstants.StartupClassFilePath, startupCodeFile);
+
+                this.CodeFileNames = this.CodeFiles.Keys.ToList();
+            }
+
+            this.activeCodeFile = startupCodeFile;
+
+            // TODO: update method name when refactoring the code editor JS module
+            this.JsRuntime.InvokeVoid("App.Repl.setCodeEditorContainerHeight", "csharp");
+        }
+
+        private async Task HandleActivityToggleAsync(ActivityToggleEventArgs eventArgs)
+        {
+            switch (eventArgs?.Activity)
+            {
+                case nameof(PackageManager):
+                    this.PackageManagerVisible = eventArgs.Visible;
+                    this.StaticAssetManagerVisible = false;
+                    break;
+
+                case nameof(StaticAssetManager):
+                    this.StaticAssetManagerVisible = eventArgs.Visible;
+                    this.PackageManagerVisible = false;
+                    break;
+
+                default:
+                    return;
+            }
+
+            this.StateHasChanged();
+            await Task.Delay(1); // Ensure rendering has time to be called
+
+            this.CodeEditorComponent.Resize();
+        }
+
+        private async Task HandlePackageStaticAssetsInstalledAsync(IEnumerable<string> packageStaticAssetFileNames)
+        {
+            foreach (var packageStaticFileName in packageStaticAssetFileNames ?? Enumerable.Empty<string>())
+            {
+                await this.StaticAssetManagerComponent.AddPackageStaticAssetAsync(packageStaticFileName);
+            }
+        }
+
+        private void HandleStaticAssetsUpdated() =>
+            this.StaticAssetsCount = (this.StaticAssets.Scripts?.Count ?? 0) + (this.StaticAssets.Styles?.Count ?? 0);
 
         private void UpdateActiveCodeFileContent()
         {
             if (this.activeCodeFile == null)
             {
-                this.PageNotificationsComponent.AddNotification(NotificationType.Error, "No active file to update.");
+                this.GetPageNotificationsComponent().AddNotification(NotificationType.Error, "No active file to update.");
                 return;
             }
 
@@ -255,8 +369,7 @@
             this.LoaderText = loaderText;
 
             this.StateHasChanged();
-
-            return Task.Delay(10); // Ensure rendering has time to be called
+            return Task.Delay(1); // Ensure rendering has time to be called
         }
     }
 }

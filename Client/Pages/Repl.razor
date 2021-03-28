@@ -4,12 +4,16 @@
 
 <nav class="navbar repl-navbar">
     <div class="container-fluid">
-        <div class="navbar-header" style="color: #303133">
+        <div class="navbar-header">
             <a href="/" class="navbar-brand">Blazor REPL</a>
-            <button class="btn btn-link nav-action" @onclick="@CompileAsync" disabled="@Loading" title="Run (Ctrl + S)">
+            <button @onclick="@CompileAsync" class="btn btn-link nav-action" disabled="@ShowLoader" title="Run (Ctrl+S)">
                 <i class="icon-play4"></i> RUN
             </button>
-            <button @onclick="@ShowSaveSnippetPopup" class="btn btn-link nav-action" id="save-snippet-btn" title="Save public snippet">
+            <button @onclick="@ShowSaveSnippetPopup"
+                    class="btn btn-link nav-action"
+                    id="save-snippet-btn"
+                    disabled="@ShowLoader"
+                    title="Save public snippet">
                 <i class="icon-floppy-disk"></i> SAVE
             </button>
         </div>
@@ -19,23 +23,51 @@
 <SaveSnippetPopup @bind-Visible="@SaveSnippetPopupVisible"
                   InvokerId="save-snippet-btn"
                   CodeFiles="@CodeFiles.Values"
-                  UpdateActiveCodeFileContentAction="UpdateActiveCodeFileContent"></SaveSnippetPopup>
+                  InstalledPackages="@InstalledPackages"
+                  StaticAssets="@StaticAssets"></SaveSnippetPopup>
 
-<div class="row flex" style="margin: 0">
-    <ReplLoader Show="@Loading"
+<div class="row flex m-0">
+    <ReplLoader Show="@ShowLoader"
                 Message="@LoaderText"></ReplLoader>
 
-    <div id="user-code-editor-container">
-        <TabManager Tabs="@CodeFileNames"
-                    OnTabActivate="@HandleTabActivate"
-                    OnTabClose="@HandleTabClose"
-                    OnTabCreate="@HandleTabCreate"></TabManager>
+    <div class="activity-sidebar @ActivitySidebarExpandedClass">
+        <ActivityBar OnActivityToggle="HandleActivityToggleAsync"
+                     PackagesCount="InstalledPackagesCount"
+                     StaticAssetsCount="StaticAssetsCount"></ActivityBar>
 
-        <CodeEditor @ref="@CodeEditorComponent"
-                    Code="@CodeEditorContent"></CodeEditor>
+        <PackageManager @ref="PackageManagerComponent"
+                        @bind-ShowLoader="@ShowLoader"
+                        UpdateLoaderTextFunc="UpdateLoaderTextAsync"
+                        Visible="@PackageManagerVisible"
+                        PackagesToRestore="PackagesToRestore"
+                        CompilationService="CompilationService"
+                        OnStaticAssetsInstalled="HandlePackageStaticAssetsInstalledAsync"
+                        SessionId="@SessionId"></PackageManager>
+
+        <StaticAssetManager @ref="StaticAssetManagerComponent"
+                            Visible="@StaticAssetManagerVisible"
+                            Scripts="StaticAssets.Scripts"
+                            Styles="StaticAssets.Styles"
+                            OnStaticAssetsUpdated="HandleStaticAssetsUpdated"
+                            SessionId="@SessionId"></StaticAssetManager>
     </div>
-    <div id="user-page-window-container">
-        <iframe id="user-page-window" src="/user-page"></iframe>
+
+    <div class="flex @SplittableContainerClass">
+        <div id="user-code-editor-container">
+            <TabManager Tabs="@CodeFileNames"
+                        ActiveTab="@CodeEditorPath"
+                        OnTabActivate="@HandleTabActivate"
+                        OnTabClose="@HandleTabClose"
+                        OnTabCreate="@HandleTabCreate"
+                        OnScaffoldStartupSettingClick="@HandleScaffoldStartupSettingClick"></TabManager>
+
+            <CodeEditor @ref="@CodeEditorComponent"
+                        Code="@CodeEditorContent"
+                        CodeFileType="@CodeFileType"></CodeEditor>
+        </div>
+        <div id="user-page-window-container">
+            <iframe id="user-page-window" src="/user-page"></iframe>
+        </div>
     </div>
 </div>
 

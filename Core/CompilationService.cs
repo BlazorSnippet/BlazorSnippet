@@ -11,19 +11,85 @@
     using System.Net.Http.Json;
     using System.Runtime;
     using System.Text;
+    using System.Text.RegularExpressions;
     using System.Threading.Tasks;
     using Microsoft.AspNetCore.Components.Routing;
+    using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
     using Microsoft.AspNetCore.Razor.Language;
     using Microsoft.CodeAnalysis;
     using Microsoft.CodeAnalysis.CSharp;
     using Microsoft.CodeAnalysis.Razor;
-    using Microsoft.JSInterop;
     using Telerik.Blazor.Components;
     using Telerik.Blazor.Extensions;
 
+    /// <remarks>
+    /// Must be registered in DI container as transient because of the base compilation and the method for adding assembly references to it
+    /// </remarks>
     public class CompilationService
     {
         public const string DefaultRootNamespace = "BlazorRepl.UserComponents";
+
+        public static readonly IDictionary<string, string> BaseAssemblyPackageVersionMappings = new Dictionary<string, string>
+        {
+            ["Microsoft.AspNetCore.Components"] = "5.0.4.0",
+            ["Microsoft.AspNetCore.Components.Forms"] = "5.0.4.0",
+            ["Microsoft.AspNetCore.Components.Web"] = "5.0.4.0",
+            ["Microsoft.AspNetCore.Components.WebAssembly"] = "5.0.4.0",
+            ["Microsoft.Extensions.Configuration"] = "5.0.0.0",
+            ["Microsoft.Extensions.Configuration.Abstractions"] = "5.0.0.0",
+            ["Microsoft.Extensions.Configuration.Json"] = "5.0.0.0",
+            ["Microsoft.Extensions.DependencyInjection"] = "5.0.1.0",
+            ["Microsoft.Extensions.DependencyInjection.Abstractions"] = "5.0.0.0",
+            ["Microsoft.Extensions.Logging"] = "5.0.0.0",
+            ["Microsoft.Extensions.Logging.Abstractions"] = "5.0.0.0",
+            ["Microsoft.Extensions.Options"] = "5.0.0.0",
+            ["Microsoft.Extensions.Primitives"] = "5.0.0.0",
+            ["Microsoft.JSInterop"] = "5.0.4.0",
+            ["Microsoft.JSInterop.WebAssembly"] = "5.0.4.0",
+            ["Microsoft.Win32.Primitives"] = "5.0.0.0",
+            ["System.Collections"] = "5.0.0.0",
+            ["System.Collections.Concurrent"] = "5.0.0.0",
+            ["System.Collections.NonGeneric"] = "5.0.0.0",
+            ["System.ComponentModel"] = "5.0.0.0",
+            ["System.ComponentModel.Annotations"] = "5.0.0.0",
+            ["System.Console"] = "5.0.0.0",
+            ["System.Diagnostics.DiagnosticSource"] = "5.0.1.0",
+            ["System.Diagnostics.Tracing"] = "5.0.0.0",
+            ["System.IO.Compression"] = "5.0.0.0",
+            ["System.IO.Pipelines"] = "5.0.1.0",
+            ["System.Linq"] = "5.0.0.0",
+            ["System.Linq.Expressions"] = "5.0.0.0",
+            ["System.Memory"] = "5.0.0.0",
+            ["System.Net.Http"] = "5.0.0.0",
+            ["System.Net.Http.Json"] = "5.0.0.0",
+            ["System.Net.NameResolution"] = "5.0.0.0",
+            ["System.Net.NetworkInformation"] = "5.0.0.0",
+            ["System.Net.Primitives"] = "5.0.0.0",
+            ["System.Net.Security"] = "5.0.0.0",
+            ["System.Net.Sockets"] = "5.0.0.0",
+            ["System.ObjectModel"] = "5.0.0.0",
+            ["System.Private.Uri"] = "5.0.0.0",
+            ["System.Reflection.Emit"] = "5.0.0.0",
+            ["System.Reflection.Emit.ILGeneration"] = "5.0.0.0",
+            ["System.Reflection.Emit.Lightweight"] = "5.0.0.0",
+            ["System.Reflection.Primitives"] = "5.0.0.0",
+            ["System.Runtime"] = "5.0.0.0",
+            ["System.Runtime.InteropServices"] = "5.0.0.0",
+            ["System.Runtime.InteropServices.RuntimeInformation"] = "5.0.0.0",
+            ["System.Runtime.Loader"] = "5.0.0.0",
+            ["System.Security.Claims"] = "5.0.0.0",
+            ["System.Security.Cryptography.Algorithms"] = "5.0.0.0",
+            ["System.Security.Cryptography.Encoding"] = "5.0.0.0",
+            ["System.Security.Cryptography.Primitives"] = "5.0.0.0",
+            ["System.Security.Cryptography.X509Certificates"] = "5.0.0.0",
+            ["System.Security.Principal.Windows"] = "5.0.0.0",
+            ["System.Text.Encoding.Extensions"] = "5.0.0.0",
+            ["System.Text.Encodings.Web"] = "5.0.1.0",
+            ["System.Text.Json"] = "5.0.1.0",
+            ["System.Text.RegularExpressions"] = "5.0.0.0",
+            ["System.Threading"] = "5.0.0.0",
+            ["System.Threading.Channels"] = "5.0.0.0",
+        };
 
         private const string WorkingDirectory = "/BlazorRepl/";
         private const string DefaultImports = @"@using System.ComponentModel.DataAnnotations
@@ -38,58 +104,59 @@
 @using Telerik.DataSource.Extensions
 @using Telerik.Blazor.Components";
 
-        // Creating the initial compilation + reading references is on the order of 250ms without caching
+        private static readonly CSharpParseOptions CSharpParseOptions = new(LanguageVersion.Preview);
+        private static readonly RazorProjectFileSystem RazorProjectFileSystem = new VirtualRazorProjectFileSystem();
+
+        private readonly HttpClient httpClient;
+
+        // Creating the initial compilation + reading references is taking a lot of time without caching
         // so making sure it doesn't happen for each run.
-        private static CSharpCompilation baseCompilation;
-        private static CSharpParseOptions cSharpParseOptions;
+        private CSharpCompilation baseCompilation;
 
-        private readonly RazorProjectFileSystem fileSystem = new VirtualRazorProjectFileSystem();
-        private readonly RazorConfiguration configuration = RazorConfiguration.Create(
-            RazorLanguageVersion.Latest,
-            configurationName: "Blazor",
-            extensions: Array.Empty<RazorExtension>());
-
-        public static async Task InitAsync(HttpClient httpClient)
+        public CompilationService(HttpClient httpClient)
         {
-            var basicReferenceAssemblyRoots = new[]
+            this.httpClient = httpClient;
+        }
+
+        public async Task InitializeAsync()
+        {
+            if (this.baseCompilation != null)
             {
-                typeof(Console).Assembly, // System.Console
-                typeof(Uri).Assembly, // System.Private.Uri
+                return;
+            }
+
+            var referenceAssemblyRoots = new[]
+            {
                 typeof(AssemblyTargetedPatchBandAttribute).Assembly, // System.Private.CoreLib
-                typeof(NavLink).Assembly, // Microsoft.AspNetCore.Components.Web
+                typeof(Uri).Assembly, // System.Private.Uri
+                typeof(Console).Assembly, // System.Console
                 typeof(IQueryable).Assembly, // System.Linq.Expressions
-                typeof(HttpClientJsonExtensions).Assembly, // System.Net.Http.Json
                 typeof(HttpClient).Assembly, // System.Net.Http
-                typeof(IJSRuntime).Assembly, // Microsoft.JSInterop
+                typeof(HttpClientJsonExtensions).Assembly, // System.Net.Http.Json
                 typeof(RequiredAttribute).Assembly, // System.ComponentModel.Annotations
                 typeof(DataTable).Assembly, // System.Data
                 typeof(TelerikGrid<>).Assembly, // Telerik.Blazor.Components
                 typeof(DataSourceExtensions).Assembly, // Telerik.DataSource
+                typeof(Regex).Assembly, // System.Text.RegularExpressions
+                typeof(NavLink).Assembly, // Microsoft.AspNetCore.Components.Web
+                typeof(WebAssemblyHostBuilder).Assembly, // Microsoft.AspNetCore.Components.WebAssembly
             };
 
-            var assemblyNames = basicReferenceAssemblyRoots
-                .SelectMany(assembly => assembly.GetReferencedAssemblies().Concat(new[] { assembly.GetName() }))
-                .Select(x => x.Name)
-                .Distinct()
+            var referenceAssemblyNames = referenceAssemblyRoots
+                .SelectMany(a => a.GetReferencedAssemblies().Concat(new[] { a.GetName() }))
+                .Select(an => an.Name)
+                .ToHashSet();
+
+            var referenceAssembliesStreams = await this.GetReferenceAssembliesStreamsAsync(referenceAssemblyNames);
+
+            var referenceAssemblies = referenceAssembliesStreams
+                .Select(s => MetadataReference.CreateFromStream(s, MetadataReferenceProperties.Assembly))
                 .ToList();
 
-            var assemblyStreams = await GetStreamFromHttpAsync(httpClient, assemblyNames);
-
-            var allReferenceAssemblies = assemblyStreams.ToDictionary(a => a.Key, a => MetadataReference.CreateFromStream(a.Value));
-
-            var basicReferenceAssemblies = allReferenceAssemblies
-                .Where(a => basicReferenceAssemblyRoots
-                    .Select(x => x.GetName().Name)
-                    .Union(basicReferenceAssemblyRoots.SelectMany(y => y.GetReferencedAssemblies().Select(z => z.Name)))
-                    .Any(n => n == a.Key))
-                .Select(a => a.Value)
-                .ToList();
-
-            baseCompilation = CSharpCompilation.Create(
+            this.baseCompilation = CSharpCompilation.Create(
                 "BlazorRepl.UserComponents",
-                Array.Empty<SyntaxTree>(),
-                basicReferenceAssemblies,
-                new CSharpCompilationOptions(
+                references: referenceAssemblies,
+                options: new CSharpCompilationOptions(
                     OutputKind.DynamicallyLinkedLibrary,
                     optimizationLevel: OptimizationLevel.Release,
                     concurrentBuild: false,
@@ -99,13 +166,24 @@
                         new KeyValuePair<string, ReportDiagnostic>("CS1701", ReportDiagnostic.Suppress),
                         new KeyValuePair<string, ReportDiagnostic>("CS1702", ReportDiagnostic.Suppress),
                     }));
+        }
 
-            cSharpParseOptions = new CSharpParseOptions(LanguageVersion.Preview);
+        public void AddAssemblyReferences(IEnumerable<byte[]> dllsBytes)
+        {
+            if (dllsBytes == null)
+            {
+                throw new ArgumentNullException(nameof(dllsBytes));
+            }
+
+            this.ThrowIfNotInitialized();
+
+            var references = dllsBytes.Select(x => MetadataReference.CreateFromImage(x, MetadataReferenceProperties.Assembly));
+
+            this.baseCompilation = this.baseCompilation.AddReferences(references);
         }
 
         public async Task<CompileToAssemblyResult> CompileToAssemblyAsync(
             ICollection<CodeFile> codeFiles,
-            string preset,
             Func<string, Task> updateStatusFunc) // TODO: try convert to event
         {
             if (codeFiles == null)
@@ -113,64 +191,11 @@
                 throw new ArgumentNullException(nameof(codeFiles));
             }
 
+            this.ThrowIfNotInitialized();
+
             var cSharpResults = await this.CompileToCSharpAsync(codeFiles, updateStatusFunc);
 
-            await (updateStatusFunc?.Invoke("Compiling Assembly") ?? Task.CompletedTask);
-            var result = CompileToAssembly(cSharpResults);
-
-            return result;
-        }
-
-        private static async Task<IDictionary<string, Stream>> GetStreamFromHttpAsync(HttpClient httpClient, IEnumerable<string> assemblyNames)
-        {
-            var streams = new ConcurrentDictionary<string, Stream>();
-
-            await Task.WhenAll(
-                assemblyNames.Select(async assemblyName =>
-                {
-                    var result = await httpClient.GetAsync($"/_framework/{assemblyName}.dll");
-
-                    result.EnsureSuccessStatusCode();
-
-                    streams.TryAdd(assemblyName, await result.Content.ReadAsStreamAsync());
-                }));
-
-            return streams;
-        }
-
-        private static CompileToAssemblyResult CompileToAssembly(ICollection<CompileToCSharpResult> cSharpResults)
-        {
-            if (cSharpResults.Any(r => r.Diagnostics.Any(d => d.Severity == DiagnosticSeverity.Error)))
-            {
-                return new CompileToAssemblyResult { Diagnostics = cSharpResults.SelectMany(r => r.Diagnostics).ToList() };
-            }
-
-            var syntaxTrees = new List<SyntaxTree>(cSharpResults.Count);
-            foreach (var cSharpResult in cSharpResults)
-            {
-                syntaxTrees.Add(CSharpSyntaxTree.ParseText(cSharpResult.Code, cSharpParseOptions));
-            }
-
-            var finalCompilation = baseCompilation.AddSyntaxTrees(syntaxTrees);
-
-            var compilationDiagnostics = finalCompilation.GetDiagnostics().Where(d => d.Severity > DiagnosticSeverity.Info);
-
-            var result = new CompileToAssemblyResult
-            {
-                Compilation = finalCompilation,
-                Diagnostics = compilationDiagnostics
-                    .Select(CompilationDiagnostic.FromCSharpDiagnostic)
-                    .Concat(cSharpResults.SelectMany(r => r.Diagnostics))
-                    .ToList(),
-            };
-
-            if (result.Diagnostics.All(x => x.Severity != DiagnosticSeverity.Error))
-            {
-                using var peStream = new MemoryStream();
-                finalCompilation.Emit(peStream);
-
-                result.AssemblyBytes = peStream.ToArray();
-            }
+            var result = this.CompileToAssembly(cSharpResults);
 
             return result;
         }
@@ -197,62 +222,8 @@
                 Encoding.UTF8.GetBytes(fileContent.TrimStart()));
         }
 
-        private async Task<ICollection<CompileToCSharpResult>> CompileToCSharpAsync(
-            ICollection<CodeFile> codeFiles,
-            Func<string, Task> updateStatusFunc)
-        {
-            // The first phase won't include any metadata references for component discovery. This mirrors what the build does.
-            var projectEngine = this.CreateRazorProjectEngine(Array.Empty<MetadataReference>());
-
-            // Result of generating declarations
-            var declarations = new List<CompileToCSharpResult>(codeFiles.Count);
-            foreach (var codeFile in codeFiles)
-            {
-                var projectItem = CreateRazorProjectItem(codeFile.Path, codeFile.Content);
-
-                var codeDocument = projectEngine.ProcessDeclarationOnly(projectItem);
-                var cSharpDocument = codeDocument.GetCSharpDocument();
-
-                declarations.Add(new CompileToCSharpResult
-                {
-                    ProjectItem = projectItem,
-                    Code = cSharpDocument.GeneratedCode,
-                    Diagnostics = cSharpDocument.Diagnostics.Select(CompilationDiagnostic.FromRazorDiagnostic).ToList(),
-                });
-            }
-
-            // Result of doing 'temp' compilation
-            var tempAssembly = CompileToAssembly(declarations);
-            if (tempAssembly.Diagnostics.Any(d => d.Severity == DiagnosticSeverity.Error))
-            {
-                return new[] { new CompileToCSharpResult { Diagnostics = tempAssembly.Diagnostics } };
-            }
-
-            // Add the 'temp' compilation as a metadata reference
-            var references = new List<MetadataReference>(baseCompilation.References) { tempAssembly.Compilation.ToMetadataReference() };
-            projectEngine = this.CreateRazorProjectEngine(references);
-
-            await (updateStatusFunc?.Invoke("Preparing Project") ?? Task.CompletedTask);
-
-            var results = new List<CompileToCSharpResult>(codeFiles.Count);
-            foreach (var declaration in declarations)
-            {
-                var codeDocument = projectEngine.Process(declaration.ProjectItem);
-                var cSharpDocument = codeDocument.GetCSharpDocument();
-
-                results.Add(new CompileToCSharpResult
-                {
-                    ProjectItem = declaration.ProjectItem,
-                    Code = cSharpDocument.GeneratedCode,
-                    Diagnostics = cSharpDocument.Diagnostics.Select(CompilationDiagnostic.FromRazorDiagnostic).ToList(),
-                });
-            }
-
-            return results;
-        }
-
-        private RazorProjectEngine CreateRazorProjectEngine(IReadOnlyList<MetadataReference> references) =>
-            RazorProjectEngine.Create(this.configuration, this.fileSystem, b =>
+        private static RazorProjectEngine CreateRazorProjectEngine(IReadOnlyList<MetadataReference> references) =>
+            RazorProjectEngine.Create(RazorConfiguration.Default, RazorProjectFileSystem, b =>
             {
                 b.SetRootNamespace(DefaultRootNamespace);
                 b.AddDefaultImports(DefaultImports);
@@ -263,5 +234,152 @@
                 b.Features.Add(new CompilationTagHelperFeature());
                 b.Features.Add(new DefaultMetadataReferenceFeature { References = references });
             });
+
+        private async Task<IEnumerable<Stream>> GetReferenceAssembliesStreamsAsync(IEnumerable<string> referenceAssemblyNames)
+        {
+            var streams = new ConcurrentBag<Stream>();
+
+            await Task.WhenAll(
+                referenceAssemblyNames.Select(async assemblyName =>
+                {
+                    var result = await this.httpClient.GetAsync($"/_framework/{assemblyName}.dll");
+
+                    result.EnsureSuccessStatusCode();
+
+                    streams.Add(await result.Content.ReadAsStreamAsync());
+                }));
+
+            return streams;
+        }
+
+        private CompileToAssemblyResult CompileToAssembly(IReadOnlyList<CompileToCSharpResult> cSharpResults)
+        {
+            if (cSharpResults.Any(r => r.Diagnostics.Any(d => d.Severity == DiagnosticSeverity.Error)))
+            {
+                return new CompileToAssemblyResult { Diagnostics = cSharpResults.SelectMany(r => r.Diagnostics).ToList() };
+            }
+
+            var syntaxTrees = new SyntaxTree[cSharpResults.Count];
+            for (var i = 0; i < cSharpResults.Count; i++)
+            {
+                var cSharpResult = cSharpResults[i];
+                syntaxTrees[i] = CSharpSyntaxTree.ParseText(cSharpResult.Code, CSharpParseOptions, cSharpResult.FilePath);
+            }
+
+            var finalCompilation = this.baseCompilation.AddSyntaxTrees(syntaxTrees);
+
+            var compilationDiagnostics = finalCompilation.GetDiagnostics().Where(d => d.Severity > DiagnosticSeverity.Info);
+
+            var result = new CompileToAssemblyResult
+            {
+                Compilation = finalCompilation,
+                Diagnostics = compilationDiagnostics
+                    .Select(CompilationDiagnostic.FromCSharpDiagnostic)
+                    .Concat(cSharpResults.SelectMany(r => r.Diagnostics))
+                    .ToList(),
+            };
+
+            if (result.Diagnostics.All(x => x.Severity != DiagnosticSeverity.Error))
+            {
+                using var peStream = new MemoryStream();
+                finalCompilation.Emit(peStream);
+
+                result.AssemblyBytes = peStream.ToArray();
+            }
+
+            return result;
+        }
+
+        private async Task<IReadOnlyList<CompileToCSharpResult>> CompileToCSharpAsync(
+            ICollection<CodeFile> codeFiles,
+            Func<string, Task> updateStatusFunc)
+        {
+            await (updateStatusFunc?.Invoke("Preparing Project") ?? Task.CompletedTask);
+
+            // The first phase won't include any metadata references for component discovery. This mirrors what the build does.
+            var projectEngine = CreateRazorProjectEngine(Array.Empty<MetadataReference>());
+
+            // Result of generating declarations
+            var declarations = new CompileToCSharpResult[codeFiles.Count];
+            var index = 0;
+            foreach (var codeFile in codeFiles)
+            {
+                if (codeFile.Type == CodeFileType.Razor)
+                {
+                    var projectItem = CreateRazorProjectItem(codeFile.Path, codeFile.Content);
+
+                    var codeDocument = projectEngine.ProcessDeclarationOnly(projectItem);
+                    var cSharpDocument = codeDocument.GetCSharpDocument();
+
+                    declarations[index] = new CompileToCSharpResult
+                    {
+                        FilePath = codeFile.Path,
+                        ProjectItem = projectItem,
+                        Code = cSharpDocument.GeneratedCode,
+                        Diagnostics = cSharpDocument.Diagnostics.Select(CompilationDiagnostic.FromRazorDiagnostic).ToList(),
+                    };
+                }
+                else
+                {
+                    declarations[index] = new CompileToCSharpResult
+                    {
+                        FilePath = codeFile.Path,
+                        Code = codeFile.Content,
+                        Diagnostics = Enumerable.Empty<CompilationDiagnostic>(), // Will actually be evaluated later
+                    };
+                }
+
+                index++;
+            }
+
+            // Result of doing 'temp' compilation
+            var tempAssembly = this.CompileToAssembly(declarations);
+            if (tempAssembly.Diagnostics.Any(d => d.Severity == DiagnosticSeverity.Error))
+            {
+                return new[] { new CompileToCSharpResult { Diagnostics = tempAssembly.Diagnostics } };
+            }
+
+            await (updateStatusFunc?.Invoke("Compiling Assembly") ?? Task.CompletedTask);
+
+            // Add the 'temp' compilation as a metadata reference
+            var references = new List<MetadataReference>(this.baseCompilation.References) { tempAssembly.Compilation.ToMetadataReference() };
+            projectEngine = CreateRazorProjectEngine(references);
+
+            var results = new CompileToCSharpResult[declarations.Length];
+            for (index = 0; index < declarations.Length; index++)
+            {
+                var declaration = declarations[index];
+                var isRazorDeclaration = declaration.ProjectItem != null;
+
+                if (isRazorDeclaration)
+                {
+                    var codeDocument = projectEngine.Process(declaration.ProjectItem);
+                    var cSharpDocument = codeDocument.GetCSharpDocument();
+
+                    results[index] = new CompileToCSharpResult
+                    {
+                        FilePath = declaration.FilePath,
+                        ProjectItem = declaration.ProjectItem,
+                        Code = cSharpDocument.GeneratedCode,
+                        Diagnostics = cSharpDocument.Diagnostics.Select(CompilationDiagnostic.FromRazorDiagnostic).ToList(),
+                    };
+                }
+                else
+                {
+                    results[index] = declaration;
+                }
+            }
+
+            return results;
+        }
+
+        private void ThrowIfNotInitialized()
+        {
+            if (this.baseCompilation == null)
+            {
+                throw new InvalidOperationException(
+                    $"{nameof(CompilationService)} is not initialized. Please call {nameof(this.InitializeAsync)} to initialize it.");
+            }
+        }
     }
 }

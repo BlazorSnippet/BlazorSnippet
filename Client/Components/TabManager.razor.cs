@@ -6,9 +6,8 @@
     using BlazorRepl.Client.Models;
     using BlazorRepl.Client.Services;
     using Microsoft.AspNetCore.Components;
-    using Microsoft.JSInterop;
 
-    public partial class TabManager : IDisposable
+    public partial class TabManager
     {
         private const int DefaultActiveIndex = 0;
 
@@ -17,13 +16,12 @@
         private string newTab;
         private ElementReference newTabInput;
         private string previousInvalidTab;
-        private DotNetObjectReference<TabManager> dotNetInstance;
-
-        [Inject]
-        public IJSInProcessRuntime JsRuntime { get; set; }
 
         [Parameter]
         public IList<string> Tabs { get; set; }
+
+        [Parameter]
+        public string ActiveTab { get; set; }
 
         [Parameter]
         public EventCallback<string> OnTabActivate { get; set; }
@@ -34,38 +32,34 @@
         [Parameter]
         public EventCallback<string> OnTabCreate { get; set; }
 
+        [Parameter]
+        public EventCallback OnScaffoldStartupSettingClick { get; set; }
+
         [CascadingParameter]
-        private PageNotifications PageNotificationsComponent { get; set; }
+        private Func<PageNotifications> GetPageNotificationsComponent { get; set; }
 
         private int ActiveIndex { get; set; } = DefaultActiveIndex;
 
+        private bool TabSettingsPopupVisible { get; set; }
+
         private string TabCreatingDisplayStyle => this.tabCreating ? string.Empty : "display: none;";
 
-        public void Dispose()
+        public override Task SetParametersAsync(ParameterView parameters)
         {
-            this.dotNetInstance?.Dispose();
-            this.PageNotificationsComponent?.Dispose();
+            if (parameters.TryGetValue<string>(nameof(this.ActiveTab), out var newActiveTab))
+            {
+                var activeIndex = this.Tabs?.IndexOf(newActiveTab);
+                if (activeIndex >= 0)
+                {
+                    this.ActiveIndex = activeIndex.Value;
+                }
+            }
 
-            this.JsRuntime.InvokeVoid("App.TabManager.dispose");
-        }
-
-        [JSInvokable]
-        public async Task CreateTabAsync()
-        {
-            await this.CreateTabAsyncInternal();
-
-            this.StateHasChanged();
+            return base.SetParametersAsync(parameters);
         }
 
         protected override async Task OnAfterRenderAsync(bool firstRender)
         {
-            if (firstRender)
-            {
-                this.dotNetInstance = DotNetObjectReference.Create(this);
-
-                this.JsRuntime.InvokeVoid("App.TabManager.init", "#new-tab-input", this.dotNetInstance);
-            }
-
             if (this.shouldFocusNewTabInput)
             {
                 this.shouldFocusNewTabInput = false;
@@ -83,6 +77,7 @@
                 return Task.CompletedTask;
             }
 
+            this.ActiveTab = this.Tabs[activeIndex];
             this.ActiveIndex = activeIndex;
 
             return this.OnTabActivate.InvokeAsync(this.Tabs[activeIndex]);
@@ -111,6 +106,8 @@
             }
         }
 
+        private void ToggleTabSettingsPopup() => this.TabSettingsPopupVisible = !this.TabSettingsPopupVisible;
+
         private void InitTabCreating()
         {
             this.tabCreating = true;
@@ -123,7 +120,7 @@
             this.newTab = null;
         }
 
-        private async Task CreateTabAsyncInternal()
+        private async Task CreateTabAsync()
         {
             if (string.IsNullOrWhiteSpace(this.newTab))
             {
@@ -137,7 +134,7 @@
             {
                 if (this.previousInvalidTab != this.newTab)
                 {
-                    this.PageNotificationsComponent.AddNotification(NotificationType.Error, error ?? "File already exists.");
+                    this.GetPageNotificationsComponent().AddNotification(NotificationType.Error, error ?? "File already exists.");
                     this.previousInvalidTab = this.newTab;
                 }
 

@@ -18,11 +18,14 @@
         [Parameter]
         public string Code { get; set; }
 
+        [Parameter]
+        public CodeFileType CodeFileType { get; set; }
+
         public override Task SetParametersAsync(ParameterView parameters)
         {
-            if (parameters.TryGetValue<string>(nameof(this.Code), out var parameterValue))
+            if (parameters.TryGetValue<string>(nameof(this.Code), out var newCode))
             {
-                this.hasCodeChanged = this.Code != parameterValue;
+                this.hasCodeChanged = this.Code != newCode;
             }
 
             return base.SetParametersAsync(parameters);
@@ -31,6 +34,8 @@
         public void Dispose() => this.JsRuntime.InvokeVoid("App.CodeEditor.dispose");
 
         internal void Focus() => this.JsRuntime.InvokeVoid("App.CodeEditor.focus");
+
+        internal void Resize() => this.JsRuntime.InvokeVoid("App.CodeEditor.resize");
 
         internal string GetCode() => this.JsRuntime.Invoke<string>("App.CodeEditor.getValue");
 
@@ -45,7 +50,8 @@
             }
             else if (this.hasCodeChanged)
             {
-                this.JsRuntime.InvokeVoid("App.CodeEditor.setValue", this.Code);
+                var language = this.CodeFileType == CodeFileType.CSharp ? "csharp" : "razor";
+                this.JsRuntime.InvokeVoid("App.CodeEditor.setValue", this.Code, language);
             }
 
             base.OnAfterRender(firstRender);

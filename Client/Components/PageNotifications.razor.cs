@@ -7,7 +7,7 @@
 
     public partial class PageNotifications : IDisposable
     {
-        private const double AutoCloseNotificationTimeoutMs = 7 * 1_000;
+        private const short DefaultAutoCloseTimeoutSeconds = 7;
 
         private readonly IList<PageNotification> notifications = new List<PageNotification>();
         private readonly IList<Timer> autoCloseNotificationTimers = new List<Timer>();
@@ -20,14 +20,18 @@
             }
         }
 
-        internal void AddNotification(NotificationType type, string content, string title = null)
+        internal void AddNotification(
+            NotificationType type,
+            string content,
+            string title = null,
+            short autoCloseTimeoutSeconds = DefaultAutoCloseTimeoutSeconds)
         {
             if (!string.IsNullOrWhiteSpace(content))
             {
                 var notification = new PageNotification { Type = type, Title = title, Content = content };
                 this.notifications.Add(notification);
 
-                this.AddAutoCloseNotificationTimer(notification);
+                this.AddAutoCloseNotificationTimer(notification, autoCloseTimeoutSeconds);
 
                 this.StateHasChanged();
             }
@@ -59,18 +63,18 @@
             }
         }
 
-        private void AddAutoCloseNotificationTimer(PageNotification notification)
+        private void AddAutoCloseNotificationTimer(PageNotification notification, short autoCloseTimeoutSeconds)
         {
             var autoCloseNotificationTimer = new Timer
             {
                 AutoReset = false,
                 Enabled = true,
-                Interval = AutoCloseNotificationTimeoutMs,
+                Interval = autoCloseTimeoutSeconds * 1_000,
             };
 
-            autoCloseNotificationTimer.Elapsed += (sender, args) =>
+            autoCloseNotificationTimer.Elapsed += (sender, _) =>
             {
-                if (!(sender is Timer timer))
+                if (sender is not Timer timer)
                 {
                     return;
                 }
