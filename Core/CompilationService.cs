@@ -19,8 +19,7 @@
     using Microsoft.CodeAnalysis;
     using Microsoft.CodeAnalysis.CSharp;
     using Microsoft.CodeAnalysis.Razor;
-    using Telerik.Blazor.Components;
-    using Telerik.Blazor.Extensions;
+
 
     /// <remarks>
     /// Must be registered in DI container as transient because of the base compilation and the method for adding assembly references to it
@@ -99,10 +98,7 @@
 @using Microsoft.AspNetCore.Components.Forms
 @using Microsoft.AspNetCore.Components.Routing
 @using Microsoft.AspNetCore.Components.Web
-@using Microsoft.JSInterop
-@using Telerik.Blazor
-@using Telerik.DataSource.Extensions
-@using Telerik.Blazor.Components";
+@using Microsoft.JSInterop";
 
         private static readonly CSharpParseOptions CSharpParseOptions = new(LanguageVersion.Preview);
         private static readonly RazorProjectFileSystem RazorProjectFileSystem = new VirtualRazorProjectFileSystem();
@@ -135,8 +131,6 @@
                 typeof(HttpClientJsonExtensions).Assembly, // System.Net.Http.Json
                 typeof(RequiredAttribute).Assembly, // System.ComponentModel.Annotations
                 typeof(DataTable).Assembly, // System.Data
-                typeof(TelerikGrid<>).Assembly, // Telerik.Blazor.Components
-                typeof(DataSourceExtensions).Assembly, // Telerik.DataSource
                 typeof(Regex).Assembly, // System.Text.RegularExpressions
                 typeof(NavLink).Assembly, // Microsoft.AspNetCore.Components.Web
                 typeof(WebAssemblyHostBuilder).Assembly, // Microsoft.AspNetCore.Components.WebAssembly
