@@ -177,7 +177,7 @@
                 var libraryDependencyInfo = new LibraryDependencyInfo(
                     libraryIdentity,
                     resolved: true,
-                    FrameworkConstants.CommonFrameworks.Net50,
+                    FrameworkConstants.CommonFrameworks.Net60,
                     Array.Empty<LibraryDependency>());
 
                 // App packages are marked with null source package

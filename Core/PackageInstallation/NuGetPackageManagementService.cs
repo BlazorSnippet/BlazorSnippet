@@ -9,6 +9,7 @@
     using System.Net.Http.Json;
     using System.Threading.Tasks;
     using NuGet.Common;
+    using NuGet.Configuration;
     using NuGet.DependencyResolver;
     using NuGet.Frameworks;
     using NuGet.LibraryModel;
@@ -33,8 +34,8 @@
         {
             this.remoteDependencyProvider = remoteDependencyProvider;
             this.httpClient = httpClient;
-
-            this.remoteWalkContext = new RemoteWalkContext(NullSourceCacheContext.Instance, NullLogger.Instance);
+            var mapping = PackageSourceMapping.GetPackageSourceMapping(NullSettings.Instance);
+            this.remoteWalkContext = new RemoteWalkContext(NullSourceCacheContext.Instance, mapping, NullLogger.Instance);
             this.remoteWalkContext.RemoteLibraryProviders.Add(this.remoteDependencyProvider);
 
             this.remoteDependencyWalker = new RemoteDependencyWalker(this.remoteWalkContext);
@@ -70,7 +71,7 @@
             {
                 await this.remoteDependencyWalker.WalkAsync(
                     libraryRange,
-                    framework: FrameworkConstants.CommonFrameworks.Net50,
+                    framework: FrameworkConstants.CommonFrameworks.Net60,
                     runtimeIdentifier: null,
                     runtimeGraph: null,
                     recursive: true);
@@ -205,7 +206,7 @@
 
                 var nearestCompatibleFramework = NuGetFrameworkUtility.GetNearest(
                     frameworkCandidates,
-                    FrameworkConstants.CommonFrameworks.Net50,
+                    FrameworkConstants.CommonFrameworks.Net60,
                     f => f);
 
                 if (nearestCompatibleFramework == null)
