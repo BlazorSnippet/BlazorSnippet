@@ -1,4 +1,4 @@
-# Contributing to Blazor REPL
+# Contributing to BlazorSnippet
 We value your input! We want to make contributing to this project as easy and transparent as possible, whether it's:
 
 - Reporting bugs
@@ -6,7 +6,7 @@ We value your input! We want to make contributing to this project as easy and tr
 - Joining discussions in issues
 - Submitting Pull Requests for fixes or features
 
-## We use GitHub [Pull Requests](https://github.com/BlazorRepl/BlazorRepl/pulls) for accepting code changes 
+## We use GitHub [Pull Requests](https://github.com/BlazorSnippet/BlazorSnippet/pulls) for accepting code changes 
 
 1. Fork the repo and create your branch from `master`.
 2. Be consistent with the existing code
@@ -15,8 +15,8 @@ We value your input! We want to make contributing to this project as easy and tr
 5. Open a pull request.
 6. Collaborate with us on finalizing the PR throughout the code review process
 
-## Report bugs using Github's [issues](https://github.com/BlazorREPL/BlazorREPL/issues)
-We use GitHub issues to track public bugs. Report a bug by [opening a new issue](https://github.com/BlazorRepl/BlazorRepl/issues/new); it's that easy!
+## Report bugs using Github's [issues](https://github.com/BlazorSnippet/BlazorSnippet/issues)
+We use GitHub issues to track public bugs. Report a bug by [opening a new issue](https://github.com/BlazorSnippet/BlazorSnippet/issues/new); it's that easy!
 
 **Great Bug Reports** tend to have:
 
