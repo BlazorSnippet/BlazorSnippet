@@ -5,7 +5,7 @@
 [Blazor Snippet](https://blazorsnippet.com) is a platform for writing, compiling, executing and sharing [Blazor](https://blazor.net) components entirely in the browser. 
 It's perfect for code playground and testing. It's fast and secure. The platform is built and is running entirely on top of Blazor WASM - the [WebAssembly](https://webassembly.org) hosting model of Blazor.
 
-Blazor Snippet is a continuation of the discontinued open source project [BlazorREPL](https://github.com/BlazorREPL) by Kristian Mariyanov and Vladislav Karamfilov.
+Blazor Snippet is a continuation of the discontinued open source project [BlazorREPL](https://github.com/BlazorRepl/BlazorRepl) by Kristian Mariyanov and Vladislav Karamfilov.
 
 Play with Blazor now: https://blazorsnippet.com
 
