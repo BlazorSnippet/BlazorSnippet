@@ -1,18 +1,47 @@
 ﻿window.App = window.App || (function () {
     return {
         reloadIFrame: function (id, newSrc) {
+            const that = this;
             const iFrame = document.getElementById(id);
+
             if (!iFrame) {
                 return;
             }
 
-            if (newSrc) {
+            let srcUpdated = true;
+            const iframeSrc = iFrame.getAttribute('src');
+            if (newSrc == iframeSrc) {
+                srcUpdated = false;
+            }
+
+            //detach iframe event prior to reload
+            this.unbindIframeEvents(iFrame);
+
+            if (newSrc && srcUpdated) {
                 // There needs to be some change so the iFrame is actually reloaded
                 iFrame.src = '';
-                setTimeout(() => iFrame.src = newSrc);
+                setTimeout(() => {
+                    iFrame.src = newSrc;
+                });
             } else {
                 iFrame.contentWindow.location.reload();
             }
+
+            //reattach events
+            iFrame.onload = function () {
+                that.bindIframeEvents(this);
+            };
+        },
+        bindIframeEvents: function (iframe) {
+            iframe.contentWindow.addEventListener("click", this.closeAllPopups);
+        },
+        unbindIframeEvents: function (iframe) {
+            iframe.contentWindow.removeEventListener("click", this.closeAllPopups);
+        },
+        closeAllPopups: function () {
+            window.App.SaveSnippetPopup.close();
+            window.App.TabManagerPopup.closeAll();
+            window.App.Repl.hideDrawer();
         },
         changeDisplayUrl: function (url) {
             if (!url) {
@@ -382,8 +411,6 @@ window.App.CodeExecution = window.App.CodeExecution || (function () {
                 return;
             }
 
-            const fileAsBase64String = typeof fileContent === 'string' ? fileContent : BINDING.conv_string(fileContent);
-
             const cache = await caches.open('blazor-resources-/');
 
             const cacheKeys = await cache.keys();
@@ -394,18 +421,15 @@ window.App.CodeExecution = window.App.CodeExecution || (function () {
             }
 
             const dllPath = userComponentsDllCacheKey.url.substr(window.location.origin.length);
-            const dllBytes = convertBase64StringToBytes(fileAsBase64String);
+            fileContent = typeof fileContent === 'number' ? BINDING.conv_string(fileContent) : fileContent // tranfering raw pointer to the memory of the mono string
+            const dllBytes = typeof fileContent === 'string' ? convertBase64StringToBytes(fileContent) : fileContent;
 
             await putInCacheStorage(cache, dllPath, dllBytes);
         },
-        storePackageFile: async function (rawSessionId, rawFileName, rawFileBytes) {
-            if (!rawSessionId || !rawFileName || !rawFileBytes) {
+        storePackageFile: async function (sessionId, fileName, fileBytes) {
+            if (!sessionId || !fileName || !fileBytes) {
                 return;
             }
-
-            const sessionId = BINDING.conv_string(rawSessionId);
-            const fileName = BINDING.conv_string(rawFileName);
-            const fileBytes = Blazor.platform.toUint8Array(rawFileBytes);
 
             _storedPackageFiles[fileName] = false;
 
