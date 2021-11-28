@@ -374,7 +374,7 @@ window.App.CodeExecution = window.App.CodeExecution || (function () {
             {
                 headers: {
                     'Content-Type': contentType || 'application/octet-stream',
-                    'Content-Length': fileBytes.length.toString()
+                    'Content-Length': typeof fileBytes === 'number' ? fileBytes.toString() : fileBytes.length.toString()
                 }
             });
 
