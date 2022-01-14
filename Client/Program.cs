@@ -29,14 +29,11 @@ namespace BlazorRepl.Client
 
             builder.Services.AddSingleton(serviceProvider => (IJSInProcessRuntime)serviceProvider.GetRequiredService<IJSRuntime>());
             builder.Services.AddSingleton(serviceProvider => (IJSUnmarshalledRuntime)serviceProvider.GetRequiredService<IJSRuntime>());
-
             builder.Services.AddSingleton(_ => new HttpClient { BaseAddress = new Uri(builder.HostEnvironment.BaseAddress) });
-
+            // blazor snippet services
             builder.Services.AddTransient<CompilationService>();
-
             builder.Services.AddTransient<NuGetRemoteDependencyProvider>();
             builder.Services.AddTransient<NuGetPackageManagementService>();
-
             builder.Services.AddSingleton<SnippetsService>();
             builder.Services
                 .AddOptions<SnippetsOptions>()

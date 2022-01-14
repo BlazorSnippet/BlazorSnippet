@@ -1,0 +1,23 @@
+﻿To install a service at application startup create a new *.cs file, define a `class Startup` with a `public static void Configure`. Here is an example for MudBlazor. Note the required usings.
+
+```csharp
+namespace BlazorRepl.UserComponents
+{
+    using System;
+    using System.Collections.Generic;
+    using System.Linq;
+    using System.Text;
+    using System.Threading.Tasks;
+
+    // required usings for Startup:
+    using MudBlazor.Services;
+    using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
+
+    public class Startup
+    {
+        public static void Configure(WebAssemblyHostBuilder builder) {
+            builder.Services.AddMudServices();
+        }
+    }
+}
+``` 
