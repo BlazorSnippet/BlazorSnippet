@@ -16,6 +16,9 @@
         public IJSUnmarshalledRuntime UnmarshalledJsRuntime { get; set; }
 
         [Inject]
+        public IJSInProcessRuntime InProcessRuntime { get; set; }
+
+        [Inject]
         public NuGetPackageManagementService NuGetPackageManagementService { get; set; }
 
         [Parameter]
@@ -245,11 +248,7 @@
             var allPackageFiles = packagesContents.DllFiles.Concat(packagesContents.JavaScriptFiles).Concat(packagesContents.CssFiles);
             foreach (var (fileName, fileBytes) in allPackageFiles)
             {
-                this.UnmarshalledJsRuntime.InvokeUnmarshalled<string, string, byte[], object>(
-                    "App.CodeExecution.storePackageFile",
-                    this.SessionId,
-                    fileName,
-                    fileBytes);
+                await this.InProcessRuntime.InvokeVoidAsync("App.CodeExecution.storePackageFile", (object)this.SessionId, fileName, fileBytes);
             }
 
             while (!this.UnmarshalledJsRuntime.InvokeUnmarshalled<bool>("App.CodeExecution.areAllPackageFilesStored"))

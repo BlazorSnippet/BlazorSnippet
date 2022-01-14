@@ -13,6 +13,7 @@
     using System.Text;
     using System.Text.RegularExpressions;
     using System.Threading.Tasks;
+    using System.Xml.Serialization;
     using Microsoft.AspNetCore.Components.Routing;
     using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
     using Microsoft.AspNetCore.Razor.Language;
@@ -37,11 +38,10 @@
             ["Microsoft.Extensions.Configuration"] = "6.0.0.0",
             ["Microsoft.Extensions.Configuration.Abstractions"] = "6.0.0.0",
             ["Microsoft.Extensions.Configuration.Json"] = "6.0.0.0",
-            ["Microsoft.Extensions.DependencyInjection"] = "5.0.1.0",
+            ["Microsoft.Extensions.DependencyInjection"] = "6.0.0.0",
             ["Microsoft.Extensions.DependencyInjection.Abstractions"] = "6.0.0.0",
             ["Microsoft.Extensions.Logging"] = "6.0.0.0",
             ["Microsoft.Extensions.Logging.Abstractions"] = "6.0.0.0",
-            ["Microsoft.Extensions.Options"] = "6.0.0.0",
             ["Microsoft.Extensions.Primitives"] = "6.0.0.0",
             ["Microsoft.JSInterop"] = "6.0.0.0",
             ["Microsoft.JSInterop.WebAssembly"] = "6.0.0.0",
@@ -49,13 +49,18 @@
             ["System.Collections"] = "6.0.0.0",
             ["System.Collections.Concurrent"] = "6.0.0.0",
             ["System.Collections.NonGeneric"] = "6.0.0.0",
+            ["System.Collections.Specialized"] = "6.0.0.0",
             ["System.ComponentModel"] = "6.0.0.0",
             ["System.ComponentModel.Annotations"] = "6.0.0.0",
+            ["System.ComponentModel.Primitives"] = "6.0.0.0",
+            ["System.ComponentModel.TypeConverter"] = "6.0.0.0",
             ["System.Console"] = "6.0.0.0",
-            ["System.Diagnostics.DiagnosticSource"] = "5.0.1.0",
+            ["System.Data.Common"] = "6.0.0.0",
+            ["System.Diagnostics.DiagnosticSource"] = "6.0.0.0",
+            ["System.Diagnostics.TraceSource"] = "6.0.0.0",
             ["System.Diagnostics.Tracing"] = "6.0.0.0",
+            ["System.Drawing.Primitives"] = "6.0.0.0",
             ["System.IO.Compression"] = "6.0.0.0",
-            ["System.IO.Pipelines"] = "5.0.1.0",
             ["System.Linq"] = "6.0.0.0",
             ["System.Linq.Expressions"] = "6.0.0.0",
             ["System.Memory"] = "6.0.0.0",
@@ -73,9 +78,11 @@
             ["System.Reflection.Emit.Lightweight"] = "6.0.0.0",
             ["System.Reflection.Primitives"] = "6.0.0.0",
             ["System.Runtime"] = "6.0.0.0",
+            ["System.Runtime.CompilerServices.Unsafe"] = "6.0.0.0",
             ["System.Runtime.InteropServices"] = "6.0.0.0",
-            ["System.Runtime.InteropServices.RuntimeInformation"] = "6.0.0.0",
             ["System.Runtime.Loader"] = "6.0.0.0",
+            ["System.Runtime.Numerics"] = "6.0.0.0",
+            ["System.Runtime.Serialization.Formatters"] = "6.0.0.0",
             ["System.Security.Claims"] = "6.0.0.0",
             ["System.Security.Cryptography.Algorithms"] = "6.0.0.0",
             ["System.Security.Cryptography.Encoding"] = "6.0.0.0",
@@ -88,6 +95,9 @@
             ["System.Text.RegularExpressions"] = "6.0.0.0",
             ["System.Threading"] = "6.0.0.0",
             ["System.Threading.Channels"] = "6.0.0.0",
+            ["System.Threading.Thread"] = "6.0.0.0",
+            ["System.Xml.ReaderWriter"] = "6.0.0.0",
+            ["System.Xml.XmlSerializer"] = "6.0.0.0"
         };
 
         private const string WorkingDirectory = "/BlazorRepl/";
@@ -100,19 +110,15 @@
 @using Microsoft.AspNetCore.Components.Web
 @using Microsoft.JSInterop";
 
-        private static readonly CSharpParseOptions CSharpParseOptions = new(LanguageVersion.Preview);
+        private static readonly CSharpParseOptions CSharpParseOptions = new CSharpParseOptions(LanguageVersion.Preview, (DocumentationMode)1);
         private static readonly RazorProjectFileSystem RazorProjectFileSystem = new VirtualRazorProjectFileSystem();
-
         private readonly HttpClient httpClient;
 
         // Creating the initial compilation + reading references is taking a lot of time without caching
         // so making sure it doesn't happen for each run.
         private CSharpCompilation baseCompilation;
 
-        public CompilationService(HttpClient httpClient)
-        {
-            this.httpClient = httpClient;
-        }
+        public CompilationService(HttpClient httpClient) => this.httpClient = httpClient;
 
         public async Task InitializeAsync()
         {
@@ -134,6 +140,7 @@
                 typeof(Regex).Assembly, // System.Text.RegularExpressions
                 typeof(NavLink).Assembly, // Microsoft.AspNetCore.Components.Web
                 typeof(WebAssemblyHostBuilder).Assembly, // Microsoft.AspNetCore.Components.WebAssembly
+                typeof (IXmlSerializable).Assembly,
             };
 
             var referenceAssemblyNames = referenceAssemblyRoots
@@ -153,6 +160,7 @@
                 options: new CSharpCompilationOptions(
                     OutputKind.DynamicallyLinkedLibrary,
                     optimizationLevel: OptimizationLevel.Release,
+                    metadataImportOptions: MetadataImportOptions.Public,
                     concurrentBuild: false,
                     //// Warnings CS1701 and CS1702 are disabled when compiling in VS too
                     specificDiagnosticOptions: new[]
@@ -162,35 +170,24 @@
                     }));
         }
 
+        public bool IsInitialized() => this.baseCompilation != null;
+
         public void AddAssemblyReferences(IEnumerable<byte[]> dllsBytes)
         {
             if (dllsBytes == null)
-            {
                 throw new ArgumentNullException(nameof(dllsBytes));
-            }
-
             this.ThrowIfNotInitialized();
-
             var references = dllsBytes.Select(x => MetadataReference.CreateFromImage(x, MetadataReferenceProperties.Assembly));
-
             this.baseCompilation = this.baseCompilation.AddReferences(references);
         }
 
-        public async Task<CompileToAssemblyResult> CompileToAssemblyAsync(
-            ICollection<CodeFile> codeFiles,
-            Func<string, Task> updateStatusFunc) // TODO: try convert to event
+        public async Task<CompileToAssemblyResult> CompileToAssemblyAsync(ICollection<CodeFile> codeFiles, Func<string, Task> updateStatusFunc)
         {
             if (codeFiles == null)
-            {
                 throw new ArgumentNullException(nameof(codeFiles));
-            }
-
             this.ThrowIfNotInitialized();
-
             var cSharpResults = await this.CompileToCSharpAsync(codeFiles, updateStatusFunc);
-
             var result = this.CompileToAssembly(cSharpResults);
-
             return result;
         }
 
@@ -204,9 +201,7 @@
             {
                 filePath = '/' + filePath;
             }
-
             fileContent = fileContent.Replace("\r", string.Empty);
-
             return new VirtualProjectItem(
                 WorkingDirectory,
                 filePath,
@@ -216,8 +211,9 @@
                 Encoding.UTF8.GetBytes(fileContent.TrimStart()));
         }
 
-        private static RazorProjectEngine CreateRazorProjectEngine(IReadOnlyList<MetadataReference> references) =>
-            RazorProjectEngine.Create(RazorConfiguration.Default, RazorProjectFileSystem, b =>
+        private static RazorProjectEngine CreateRazorProjectEngine(IReadOnlyList<MetadataReference> references)
+        {
+            return RazorProjectEngine.Create(RazorConfiguration.Default, RazorProjectFileSystem, b =>
             {
                 b.SetRootNamespace(DefaultRootNamespace);
                 b.AddDefaultImports(DefaultImports);
@@ -228,21 +224,19 @@
                 b.Features.Add(new CompilationTagHelperFeature());
                 b.Features.Add(new DefaultMetadataReferenceFeature { References = references });
             });
+        }
 
         private async Task<IEnumerable<Stream>> GetReferenceAssembliesStreamsAsync(IEnumerable<string> referenceAssemblyNames)
         {
             var streams = new ConcurrentBag<Stream>();
-
             await Task.WhenAll(
                 referenceAssemblyNames.Select(async assemblyName =>
                 {
                     var result = await this.httpClient.GetAsync($"/_framework/{assemblyName}.dll");
-
                     result.EnsureSuccessStatusCode();
 
                     streams.Add(await result.Content.ReadAsStreamAsync());
                 }));
-
             return streams;
         }
 
@@ -277,16 +271,13 @@
             {
                 using var peStream = new MemoryStream();
                 finalCompilation.Emit(peStream);
-
                 result.AssemblyBytes = peStream.ToArray();
             }
 
             return result;
         }
 
-        private async Task<IReadOnlyList<CompileToCSharpResult>> CompileToCSharpAsync(
-            ICollection<CodeFile> codeFiles,
-            Func<string, Task> updateStatusFunc)
+        private async Task<IReadOnlyList<CompileToCSharpResult>> CompileToCSharpAsync(ICollection<CodeFile> codeFiles, Func<string, Task> updateStatusFunc)
         {
             await (updateStatusFunc?.Invoke("Preparing Project") ?? Task.CompletedTask);
 
